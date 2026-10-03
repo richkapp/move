@@ -32,6 +32,8 @@ final class MoveTimer: ObservableObject {
     @Published var repeats: Int { didSet { d.set(repeats, forKey: "repeats") } }
     @Published var volume: Double { didSet { d.set(volume, forKey: "volume") } }
     @Published var showCountdown: Bool { didSet { d.set(showCountdown, forKey: "showCountdown") } }
+    @Published var warnSound: Bool { didSet { d.set(warnSound, forKey: "warnSound") } }
+    @Published private(set) var notificationsAllowed = true
     @Published var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled {
         didSet {
             do {
@@ -51,13 +53,14 @@ final class MoveTimer: ObservableObject {
 
     init() {
         d.register(defaults: ["interval": 90, "warn": 10, "sound": AlarmSound.glass.rawValue,
-                              "repeats": 2, "volume": 0.8, "showCountdown": true])
+                              "repeats": 2, "volume": 0.8, "showCountdown": true, "warnSound": true])
         intervalMin = d.integer(forKey: "interval")
         warnMin = d.integer(forKey: "warn")
         sound = AlarmSound(rawValue: d.string(forKey: "sound") ?? "") ?? .glass
         repeats = d.integer(forKey: "repeats")
         volume = d.double(forKey: "volume")
         showCountdown = d.bool(forKey: "showCountdown")
+        warnSound = d.bool(forKey: "warnSound")
 
         restart()
         let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -66,7 +69,10 @@ final class MoveTimer: ObservableObject {
         RunLoop.main.add(t, forMode: .common)
         ticker = t
 
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        Task {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            await refreshPermission()
+        }
     }
 
     // MARK: Display
@@ -119,6 +125,17 @@ final class MoveTimer: ObservableObject {
 
     func moveNow() { fire() }
 
+    /// Re-reads whether macOS lets Move show notifications, so the panel can flag it.
+    func refreshPermission() async {
+        let s = await UNUserNotificationCenter.current().notificationSettings()
+        notificationsAllowed = s.authorizationStatus == .authorized || s.authorizationStatus == .provisional
+    }
+
+    func openNotificationSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=com.richkapp.move")!
+        NSWorkspace.shared.open(url)
+    }
+
     func previewSound() { play(sound, times: 1) }
 
     // MARK: Engine
@@ -133,8 +150,12 @@ final class MoveTimer: ObservableObject {
 
         remaining = max(0, target.timeIntervalSince(now))
 
+        // Re-check notification permission every 30s so the panel warning stays accurate.
+        if Int(now.timeIntervalSince1970) % 30 == 0 { Task { await refreshPermission() } }
+
         if !warned && remaining > 0 && remaining <= Double(warnMin * 60) {
             warned = true
+            if warnSound { play(sound, times: 1, scale: 0.5) }
             notify("Move in \(warnMin) min", "Start wrapping up what you're doing.")
         }
         if remaining <= 0 { fire() }
@@ -146,13 +167,13 @@ final class MoveTimer: ObservableObject {
         restart()
     }
 
-    private func play(_ s: AlarmSound, times: Int) {
+    private func play(_ s: AlarmSound, times: Int, scale: Double = 1) {
         guard times > 0 else { return }
         for i in 0..<times {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 1.2) { [weak self] in
                 guard let self else { return }
                 let snd = NSSound(named: NSSound.Name(s.rawValue))?.copy() as? NSSound
-                snd?.volume = Float(self.volume)
+                snd?.volume = Float(self.volume * scale)
                 snd?.play()
                 self.player = snd
             }
@@ -283,9 +304,19 @@ struct PanelView: View {
                 }
 
                 Toggle("Countdown in menu bar", isOn: $t.showCountdown)
+                Toggle("Soft sound on warning", isOn: $t.warnSound)
                 Toggle("Launch at login", isOn: $t.launchAtLogin)
             }
             .font(.callout)
+
+            if !t.notificationsAllowed {
+                HStack(spacing: 6) {
+                    Image(systemName: "bell.slash.fill").foregroundStyle(.orange)
+                    Text("Notifications are off").font(.caption)
+                    Spacer()
+                    Button("Fix") { t.openNotificationSettings() }.controlSize(.small)
+                }
+            }
 
             Divider()
 
@@ -296,6 +327,7 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 270)
+        .task { await t.refreshPermission() }
     }
 }
 

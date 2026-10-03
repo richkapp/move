@@ -9,7 +9,8 @@ Every 90 minutes (or whatever you choose) Move plays a short sound and shows a n
 ## Features
 
 - Lives in the menu bar with a live countdown. No Dock icon, no windows.
-- Warning notification before each break ("Move in 10 min").
+- Warning notification before each break ("Move in 10 min"), with a soft sound.
+- Shows "Notifications are off" in the panel, with a Fix button, if macOS blocks them.
 - Five alarm sounds: Ding, Beep, Tink, Chime, Sonar. Preview each one.
 - Ring 1, 2 or 3 times, with adjustable volume.
 - Click the countdown to set the time left (`0:19`, `19`, `19m`, `1h5m`).
@@ -43,6 +44,7 @@ Click the walking figure in the menu bar:
 | Warning | 10 min before (0 turns it off) |
 | Sound | Ding |
 | Rings | 2× |
+| Soft sound on warning | On |
 | Countdown in menu bar | On |
 | Launch at login | Off |
 
